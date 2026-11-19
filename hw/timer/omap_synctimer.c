@@ -24,6 +24,7 @@ struct omap_synctimer_s {
     MemoryRegion iomem;
     uint32_t val;
     uint16_t readh;
+    uint32_t sysconfig; /*OMAP3*/
 };
 
 /* 32-kHz Sync Timer of the OMAP2 */
@@ -51,6 +52,14 @@ static uint32_t omap_synctimer_readw(void *opaque, hwaddr addr)
 
     OMAP_BAD_REG(addr);
     return 0;
+}
+
+static uint32_t omap3_synctimer_readw(void *opaque, hwaddr addr)
+{
+    struct omap_synctimer_s *s = (struct omap_synctimer_s *)opaque;
+    return (addr == 0x04)
+        ? s->sysconfig
+        : omap_synctimer_readw(opaque, addr);
 }
 
 static uint32_t omap_synctimer_readh(void *opaque, hwaddr addr)
@@ -82,15 +91,72 @@ static uint64_t omap_synctimer_readfn(void *opaque, hwaddr addr,
     }
 }
 
+static uint32_t omap3_synctimer_readh(void *opaque, hwaddr addr)
+{
+    struct omap_synctimer_s *s = (struct omap_synctimer_s *) opaque;
+    uint32_t ret;
+
+    if (addr & 2) {
+        return s->readh;
+    }
+
+    ret = omap3_synctimer_readw(opaque, addr);
+    s->readh = ret >> 16;
+    return ret & 0xffff;
+}
+
+static uint64_t omap3_synctimer_readfn(void *opaque, hwaddr addr,
+                                       unsigned size)
+{
+    switch (size) {
+    case 1:
+        return omap_badwidth_read32(opaque, addr);
+    case 2:
+        return omap3_synctimer_readh(opaque, addr);
+    default:
+        return omap3_synctimer_readw(opaque, addr);
+    }
+}
+
 static void omap_synctimer_writefn(void *opaque, hwaddr addr,
                                    uint64_t value, unsigned size)
 {
     OMAP_BAD_REG(addr);
 }
 
+
+static void omap3_synctimer_write(void *opaque, hwaddr addr,
+                                  uint32_t value)
+{
+    struct omap_synctimer_s *s = (struct omap_synctimer_s *)opaque;
+    if (addr == 0x04) {
+        s->sysconfig = value & 0x0c;
+    } else {
+        OMAP_BAD_REG(addr);
+    }
+}
+
 static const MemoryRegionOps omap_synctimer_ops = {
     .read = omap_synctimer_readfn,
     .write = omap_synctimer_writefn,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static void omap3_synctimer_writefn(void *opaque, hwaddr addr,
+                                    uint64_t value, unsigned size)
+{
+    if (size == 1) {
+        omap_badwidth_write32(opaque, addr, value);
+        return;
+    }
+    omap3_synctimer_write(opaque, addr, value);
+}
+
+static const MemoryRegionOps omap3_synctimer_ops = {
+    .read = omap3_synctimer_readfn,
+    .write = omap3_synctimer_writefn,
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,
     .endianness = DEVICE_NATIVE_ENDIAN,
@@ -102,8 +168,13 @@ struct omap_synctimer_s *omap_synctimer_init(struct omap_target_agent_s *ta,
     struct omap_synctimer_s *s = g_malloc0(sizeof(*s));
 
     omap_synctimer_reset(s);
-    memory_region_init_io(&s->iomem, NULL, &omap_synctimer_ops, s, "omap.synctimer",
-                          omap_l4_region_size(ta, 0));
+    if (cpu_class_omap3(mpu)) {
+        memory_region_init_io(&s->iomem, NULL, &omap3_synctimer_ops, s,
+                              "omap.synctimer", omap_l4_region_size(ta, 0));
+    } else {
+        memory_region_init_io(&s->iomem, NULL, &omap_synctimer_ops, s,
+                              "omap.synctimer", omap_l4_region_size(ta, 0));
+    }
     omap_l4_attach(ta, 0, &s->iomem);
 
     return s;

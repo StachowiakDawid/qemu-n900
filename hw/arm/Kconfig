@@ -39,7 +39,10 @@ config ARM_VIRT
 
 config CHEETAH
     bool
-    default y
+    select OMAP1
+    # Off by default: still uses the OMAP UART, L4, McSPI, DSS and TSC2005
+    # interfaces that the N900 port replaced, so it does not build
+    default n
     depends on TCG && ARM
     select OMAP
     select TSC210X
@@ -159,7 +162,10 @@ config OLIMEX_STM32_H405
 
 config NSERIES
     bool
-    default y
+    select OMAP2
+    # Off by default: still uses the OMAP UART, L4, McSPI, DSS and TSC2005
+    # interfaces that the N900 port replaced, so it does not build
+    default n
     depends on TCG && ARM
     select OMAP
     select TMP105   # temperature sensor
@@ -170,6 +176,25 @@ config NSERIES
     select LM832X   # GPIO keyboard chip
     select TWL92230 # energy-management
     select TUSB6010
+
+config N900
+    bool
+    default y
+    depends on TCG && ARM
+    select OMAP
+    select ONENAND
+    select TSC2005
+    select SMC91C111
+    select USB_MUSB
+    select USB_OHCI_SYSBUS
+
+config OMAP1
+    bool
+    select OMAP
+
+config OMAP2
+    bool
+    select OMAP
 
 config OMAP
     bool
@@ -328,7 +353,10 @@ config COLLIE
 
 config SX1
     bool
-    default y
+    select OMAP1
+    # Off by default: still uses the OMAP UART, L4, McSPI, DSS and TSC2005
+    # interfaces that the N900 port replaced, so it does not build
+    default n
     depends on TCG && ARM
     select OMAP
 

@@ -34,8 +34,7 @@ void tsc210x_set_transform(uWireSlave *chip, const MouseTransformInfo *info);
 void tsc210x_key_event(uWireSlave *chip, int key, int down);
 
 /* tsc2005.c */
-void *tsc2005_init(qemu_irq pintdav);
-uint32_t tsc2005_txrx(void *opaque, uint32_t value, int len);
-void tsc2005_set_transform(void *opaque, const MouseTransformInfo *info);
+void tsc2005_set_transform(DeviceState *qdev, const MouseTransformInfo *info,
+                           int z1_cons, int z2_cons);
 
 #endif

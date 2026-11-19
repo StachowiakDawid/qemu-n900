@@ -123,6 +123,9 @@ struct SDState {
     /* If true, created by sd_init() for a non-qdevified caller */
     /* TODO purge them with fire */
     bool me_no_qdev_me_kill_mammoth_with_rocks;
+    /* Board-created legacy cards accept any image size that is a
+     * whole number of 512-byte sectors, like real cards (and the 1.x model) */
+    bool allow_any_size;
 
     /* SD Memory Card Registers */
     uint32_t ocr;
@@ -534,6 +537,12 @@ static void emmc_set_csd(SDState *sd, uint64_t size)
     uint32_t wpsize = (1 << (WPGROUP_SHIFT + 1)) - 1;
 
     sd->csd[0] = (3 << 6) | (4 << 2); /* Spec v4.3 with EXT_CSD */
+    if (sd->allow_any_size) {
+        /* Legacy OMAP3 host: CSD_STRUCTURE 2 (v1.2), as many real eMMC
+         * 4.x parts report; Linux < 2.6.3x only knows 0..2 and refuses
+         * "CSD structure version 3". */
+        sd->csd[0] = (2 << 6) | (4 << 2);
+    }
     sd->csd[1] = (1 << 3) | 6; /* Asynchronous data access time: 1ms */
     sd->csd[2] = 0x00;
     sd->csd[3] = (1 << 3) | 3;; /* Maximum bus clock frequency: 100MHz */
@@ -1032,6 +1041,45 @@ SDState *sd_init(BlockBackend *blk, bool is_spi)
     sd = SD_CARD(dev);
     sd->me_no_qdev_me_kill_mammoth_with_rocks = true;
     return sd;
+}
+
+/*
+ * Like sd_init(), but can also create an eMMC (TYPE_EMMC) and
+ * accepts images whose size is not a power of two. Used by the OMAP3
+ * MMC/SD host controller model, which drives the card through the legacy
+ * sd_do_command()/sd_read_byte()/sd_write_byte() interface.
+ */
+SDState *sd_init_legacy(BlockBackend *blk, bool is_mmc)
+{
+    Object *obj;
+    DeviceState *dev;
+    SDState *sd;
+    Error *err = NULL;
+
+    obj = object_new(is_mmc ? TYPE_EMMC : TYPE_SD_CARD);
+    dev = DEVICE(obj);
+    if (blk && !qdev_prop_set_drive_err(dev, "drive", blk, &err)) {
+        error_reportf_err(err, "sd_init failed: ");
+        return NULL;
+    }
+
+    object_ref(obj);
+    object_unparent(obj);
+    sd = SDMMC_COMMON(dev);
+    sd->allow_any_size = true;
+    DEVICE_GET_CLASS(dev)->realize(dev, &err);
+    if (err) {
+        error_reportf_err(err, "sd_init failed: ");
+        return NULL;
+    }
+
+    sd->me_no_qdev_me_kill_mammoth_with_rocks = true;
+    return sd;
+}
+
+bool sd_is_mmc(SDState *sd)
+{
+    return sd_is_emmc(sd);
 }
 
 void sd_set_cb(SDState *sd, qemu_irq readonly, qemu_irq insert)
@@ -2759,7 +2807,9 @@ static void sd_realize(DeviceState *dev, Error **errp)
         }
 
         blk_size = blk_getlength(sd->blk);
-        if (blk_size > 0 && !is_power_of_2(blk_size)) {
+        if (blk_size > 0 && sd->allow_any_size && !(blk_size & 511)) {
+            /* accepted: see allow_any_size */
+        } else if (blk_size > 0 && !is_power_of_2(blk_size)) {
             int64_t blk_size_aligned = pow2ceil(blk_size);
             char *blk_size_str;
 

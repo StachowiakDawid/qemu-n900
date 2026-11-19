@@ -62,10 +62,11 @@
 
 /* Added in HDRC 1.9(?) & MHDRC 1.4 */
 /* ULPI pass-through */
-#define MUSB_HDRC_ULPI_VBUSCTL  0x70
-#define MUSB_HDRC_ULPI_REGDATA  0x74
-#define MUSB_HDRC_ULPI_REGADDR  0x75
-#define MUSB_HDRC_ULPI_REGCTL   0x76
+#define MUSB_HDRC_ULPI_VBUSCTL	0x70
+#define MUSB_HDRC_ULPI_REGDATA	0x74
+#define MUSB_HDRC_ULPI_REGADDR	0x75
+#define MUSB_HDRC_ULPI_REGCTL	0x76
+#define MUSB_HDRC_ULPI_RAWDATA  0x77
 
 /* Extended config & PHY control */
 #define MUSB_HDRC_ENDCOUNT      0x78    /* 8 bit */
@@ -1300,6 +1301,16 @@ static uint32_t musb_readb(void *opaque, hwaddr addr)
         ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
         return musb_read_fifo(s->ep + ep);
 
+    case MUSB_HDRC_ULPI_REGADDR:
+    case MUSB_HDRC_ULPI_REGDATA:
+    case MUSB_HDRC_ULPI_RAWDATA:
+        /* TODO */
+        return 0x00;
+
+    case MUSB_HDRC_ULPI_REGCTL:
+        /* TODO */
+        return 0x02;
+
     default:
         TRACE("unknown register 0x%02x", (int) addr);
         return 0x00;
@@ -1385,6 +1396,13 @@ static void musb_writeb(void *opaque, hwaddr addr, uint32_t value)
     case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
         ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
         musb_write_fifo(s->ep + ep, value & 0xff);
+        break;
+
+    case MUSB_HDRC_ULPI_REGADDR:
+    case MUSB_HDRC_ULPI_REGCTL:
+    case MUSB_HDRC_ULPI_REGDATA:
+    case MUSB_HDRC_ULPI_RAWDATA:
+        /* TODO */
         break;
 
     default:

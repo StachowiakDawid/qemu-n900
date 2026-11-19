@@ -362,45 +362,38 @@ static inline int onenand_prog_spare(OneNANDState *s, int sec, int secn,
 
 static inline int onenand_erase(OneNANDState *s, int sec, int num)
 {
-    uint8_t *blankbuf, *tmpbuf;
+    uint8_t *blankbuf;
+    int ret = 0;
 
-    blankbuf = g_malloc(512);
-    tmpbuf = g_malloc(512);
-    memset(blankbuf, 0xff, 512);
-    for (; num > 0; num--, sec++) {
-        if (s->blk_cur) {
-            int erasesec = s->secs_cur + (sec >> 5);
-            if (blk_pwrite(s->blk_cur, sec << BDRV_SECTOR_BITS,
-                           BDRV_SECTOR_SIZE, blankbuf, 0) < 0) {
-                goto fail;
-            }
-            if (blk_pread(s->blk_cur, erasesec << BDRV_SECTOR_BITS,
-                          BDRV_SECTOR_SIZE, tmpbuf, 0) < 0) {
-                goto fail;
-            }
-            memcpy(tmpbuf + ((sec & 31) << 4), blankbuf, 1 << 4);
-            if (blk_pwrite(s->blk_cur, erasesec << BDRV_SECTOR_BITS,
-                           BDRV_SECTOR_SIZE, tmpbuf, 0) < 0) {
-                goto fail;
-            }
-        } else {
-            if (sec + 1 > s->secs_cur) {
-                goto fail;
-            }
-            memcpy(s->current + (sec << 9), blankbuf, 512);
-            memcpy(s->current + (s->secs_cur << 9) + (sec << 4),
-                   blankbuf, 1 << 4);
-        }
+    if (num <= 0) {
+        return 0;
     }
-
-    g_free(tmpbuf);
+    if (!s->blk_cur && sec + num > s->secs_cur) {
+        return 1;
+    }
+    /*
+     * The main area of the erased sectors and their spare bytes
+     * (16 per sector, contiguous after the main area) are each one
+     * contiguous range, so erase with two writes instead of three 512-byte
+     * synchronous I/Os per sector (37 ms per 128 KiB block on QEMU 9; the
+     * UBI background thread erases hundreds of blocks while Linux boots).
+     */
+    blankbuf = g_malloc(num << 9);
+    memset(blankbuf, 0xff, num << 9);
+    if (s->blk_cur) {
+        if (blk_pwrite(s->blk_cur, (int64_t)sec << BDRV_SECTOR_BITS,
+                       num << BDRV_SECTOR_BITS, blankbuf, 0) < 0 ||
+            blk_pwrite(s->blk_cur,
+                       ((int64_t)s->secs_cur << BDRV_SECTOR_BITS) + (sec << 4),
+                       num << 4, blankbuf, 0) < 0) {
+            ret = 1;
+        }
+    } else {
+        memset(s->current + (sec << 9), 0xff, num << 9);
+        memset(s->current + (s->secs_cur << 9) + (sec << 4), 0xff, num << 4);
+    }
     g_free(blankbuf);
-    return 0;
-
-fail:
-    g_free(tmpbuf);
-    g_free(blankbuf);
-    return 1;
+    return ret;
 }
 
 static void onenand_command(OneNANDState *s)
@@ -709,6 +702,13 @@ static void onenand_write(void *opaque, hwaddr addr,
             s->boot[0][0 << s->shift] = s->id.man & 0xff;
             s->boot[0][1 << s->shift] = s->id.dev & 0xff;
             s->boot[0][2 << s->shift] = s->wpstatus & 0xff;
+            break;
+
+        case 0x0000:
+            /* ignore zero writes without error messages,
+             * linux omap2/3 kernel will issue these upon
+             * powerdown/reset sequence.
+             */
             break;
 
         default:
